@@ -1,0 +1,18 @@
+{
+  "name": "rule-retrieval-dev-v1",
+  "status": "开发集草案，待用户抽查；不是冻结独立评测集",
+  "cases": [
+    {"id": "r01", "question": "失去体力", "evidence": [{"page": "flow/loselife.html", "contains": "失去体力时"}]},
+    {"id": "r02", "question": "技能让我直接掉血，这也算受到伤害吗？", "evidence": [{"page": "flow/loselife.html", "contains": "失去体力"}, {"page": "flow/damage.html", "contains": "伤害"}]},
+    {"id": "r03", "question": "一次受到两点伤害，算受到一次还是两次伤害？", "evidence": [{"page": "flow/damage.html", "contains": "受到一次伤害"}]},
+    {"id": "r04", "question": "轮到我结束时，手里牌太多了怎么办？", "evidence": [{"page": "flow/game.html", "contains": "手牌"}]},
+    {"id": "r05", "question": "武将技能和通用规则矛盾时听谁的？", "evidence": [{"page": "rule/principle.html", "contains": "技能的说明"}]},
+    {"id": "r06", "question": "伤害被防止以后，还算受过伤害吗？", "evidence": [{"page": "flow/damage.html", "contains": "未受到过伤害"}]},
+    {"id": "r07", "question": "濒死时什么时候可以用桃？", "evidence": [{"page": "flow/neardeath.html", "contains": "桃"}]},
+    {"id": "r08", "question": "两个人拼点一样大怎么办？", "evidence": [{"page": "flow/rankcompare.html", "contains": "两名角色都没赢"}]},
+    {"id": "r09", "question": "锁定技和其他技能同时触发谁先结算？", "evidence": [{"page": "rule/forced.html", "contains": "锁定技"}]},
+    {"id": "r10", "question": "装备牌和手牌分别放在哪个区域？", "evidence": [{"page": "glossary/zone.html", "contains": "装备区"}]},
+    {"id": "n01", "question": "艾尔登法环的黑暗剑在哪里获得？", "evidence": [], "note": "范围外问题，仅观察误召回；尚无自动拒答阈值"},
+    {"id": "n02", "question": "星际争霸人族战列巡航舰需要多少矿？", "evidence": [], "note": "范围外问题，仅观察误召回；尚无自动拒答阈值"}
+  ]
+}
