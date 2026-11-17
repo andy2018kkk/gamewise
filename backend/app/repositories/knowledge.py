@@ -1,6 +1,7 @@
 """SQLite 待审资料存取；不做规则准入，也不选择最新快照。"""
 
 import hashlib
+from collections.abc import Callable
 import json
 from pathlib import Path
 import sqlite3
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 
 from app.schemas.character import CharacterRecord
 from app.schemas.query import CatalogItem, Game, PreviewStatus, QueryFilters, SampleRecord, SearchResult
+from app.schemas.source import SourceRecord
 from app.services.data_processor import ProcessingResult
 
 SCHEMA_VERSION = 1
@@ -112,6 +114,35 @@ class KnowledgeRepository:
         self.connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(values.values()))
         return True
 
+    def _save_source(self, source: SourceRecord, insert: Callable[[str, dict[str, object]], bool]) -> None:
+        if source.review_status != "pending" or not source.content_hash:
+            raise ValueError("当前存储入口只接受有内容指纹的待审资料")
+        insert("sources", {key: getattr(source, key) for key in
+                           ("source_id", "game_id", "title", "source_type", "source_locator")})
+        snapshot_id = hashlib.sha256(_json([source.source_id, source.content_hash]).encode("utf-8")).hexdigest()
+        insert("source_snapshots", {
+            "snapshot_id": snapshot_id, "source_id": source.source_id, "content_hash": source.content_hash,
+            "content_path": source.content_path, "collected_at": source.collected_at.isoformat(),
+            "usage_note": source.usage_note, "review_status": source.review_status,
+            "review_note": source.review_note, "version_ids_json": _json(source.version_ids),
+        })
+
+    def import_sources(self, games: list[Game], sources: list[SourceRecord]) -> ImportReport:
+        """登记文件资料的来源和快照；不写武将或技能，不自动批准。"""
+        added = dict.fromkeys(TABLE_KEYS, 0)
+
+        def insert(table: str, values: dict[str, object]) -> bool:
+            created = self._insert_or_match(table, values)
+            added[table] += int(created)
+            return created
+
+        with self.connection:
+            for game in games:
+                insert("games", game.model_dump())
+            for source in sources:
+                self._save_source(source, insert)
+        return ImportReport(added=added, totals=self.counts())
+
     def import_batches(self, games: list[Game], batches: list[ProcessingResult[CharacterRecord]]) -> ImportReport:
         """调用方先完成来源、指纹和证据校验；一批写入只有一次提交。"""
         added = dict.fromkeys(TABLE_KEYS, 0)
@@ -128,15 +159,8 @@ class KnowledgeRepository:
                 source = batch.source
                 if source.review_status != "pending" or batch.review_status != "pending":
                     raise ValueError("当前存储入口仅接受待审资料")
-                insert("sources", {key: getattr(source, key) for key in
-                                   ("source_id", "game_id", "title", "source_type", "source_locator")})
+                self._save_source(source, insert)
                 snapshot_id = hashlib.sha256(_json([source.source_id, source.content_hash]).encode("utf-8")).hexdigest()
-                insert("source_snapshots", {
-                    "snapshot_id": snapshot_id, "source_id": source.source_id, "content_hash": source.content_hash,
-                    "content_path": source.content_path, "collected_at": source.collected_at.isoformat(),
-                    "usage_note": source.usage_note, "review_status": source.review_status,
-                    "review_note": source.review_note, "version_ids_json": _json(source.version_ids),
-                })
                 for record in batch.records:
                     data = record.data
                     duplicate = self.connection.execute(

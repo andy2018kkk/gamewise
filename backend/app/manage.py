@@ -10,8 +10,10 @@ from pydantic import TypeAdapter
 from app.repositories.knowledge import KnowledgeRepository
 from app.schemas.query import Game
 from app.services.import_characters import import_character_files
+from app.services.import_sources import import_source_files
 from app.services.rule_documents import process_rule_pages
 from app.services.knowledge_tools import KnowledgeTools
+from app.services.text_library import load_text_library
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE = WORKSPACE / "data/local/knowledge.local/gamewise.sqlite3"
@@ -20,12 +22,17 @@ DEFAULT_DATABASE = WORKSPACE / "data/local/knowledge.local/gamewise.sqlite3"
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    sources = commands.add_parser("import-sources", help="登记规则或参考文件的来源和快照，不写武将表")
+    sources.add_argument("manifests", type=Path, nargs="+")
+    sources.add_argument("--games-config", type=Path, required=True)
+    sources.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     tool = commands.add_parser("tool", help="模拟模型发出只读工具调用；不接真实LLM")
-    tool.add_argument("name", choices=("discover_catalog", "search_records"))
+    tool.add_argument("name", choices=("discover_catalog", "search_records", "read_evidence"))
     tool.add_argument("--arguments-file", type=Path, required=True, help="工具参数JSON文件")
     tool.add_argument("--game", action="append", dest="allowed_games", required=True, help="由程序限定的允许范围")
     tool.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     tool.add_argument("--preview", action="store_true", help="显式读取待审正文，仅本地开发预览")
+    tool.add_argument("--text-config", type=Path, help="本地文本范围配置；模型不能指定此路径")
     rules = commands.add_parser("process-rules", help="离线整理基础规则正文，不写数据库")
     rules.add_argument("--manifest", type=Path, default=WORKSPACE / "data/local/sgs-rules.local/manifest.json")
     rules.add_argument("--output-dir", type=Path, default=WORKSPACE / "data/local/rules-processed.local")
@@ -46,8 +53,13 @@ def main() -> None:
     query.add_argument("--catalog", action="store_true")
     args = parser.parse_args()
     try:
-        if args.command == "tool":
-            tools = KnowledgeTools(args.database, args.allowed_games, preview=args.preview)
+        if args.command == "import-sources":
+            games = TypeAdapter(list[Game]).validate_json(args.games_config.read_text(encoding="utf-8-sig"))
+            report = import_source_files(args.database, args.manifests, games)
+            output = {"database": str(args.database.resolve()), **report.model_dump()}
+        elif args.command == "tool":
+            tools = KnowledgeTools(args.database, args.allowed_games, preview=args.preview,
+                text_library=load_text_library(args.text_config) if args.text_config else None)
             result = tools.invoke(args.name, args.arguments_file.read_text(encoding="utf-8-sig"))
             print(result.model_dump_json(indent=2))
             if result.error is not None:

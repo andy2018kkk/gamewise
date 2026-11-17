@@ -49,6 +49,12 @@ def _terms(text: str) -> Counter:
     return Counter(clean[i:i + 2] for i in range(max(0, len(clean) - 1)))
 
 
+def keyword_score(question: str, text: str) -> float:
+    """共用中文双字词重合分数；不是语义判断或正确概率。"""
+    terms, tokens = _terms(question), _terms(text)
+    return sum(min(count, tokens[term]) for term, count in terms.items()) / max(1, sum(terms.values()))
+
+
 def fuse_rankings(rankings: list[list[dict]], top_k: int, *, rank_constant: int = 60) -> list[dict]:
     """RRF按排名融合，原分数仅供诊断，不当作概率相加。"""
     if rank_constant < 1 or top_k < 1:
@@ -98,11 +104,9 @@ def search_rule_index(index_dir: Path, question: str, *, provider: EmbeddingProv
         scores = vectors @ (query / norm)
         ranked = [(float(scores[i]), c) for i, c in selected]
     else:
-        terms = _terms(question)
         ranked = []
         for _, chunk in selected:
-            tokens = _terms(chunk["heading"] + "\n" + chunk["text"])
-            score = sum(min(count, tokens[term]) for term, count in terms.items()) / max(1, sum(terms.values()))
+            score = keyword_score(question, chunk["heading"] + "\n" + chunk["text"])
             if score > 0:
                 ranked.append((score, chunk))
     ranked.sort(key=lambda pair: (-pair[0], pair[1]["chunk_id"]))

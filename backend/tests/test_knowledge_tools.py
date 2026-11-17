@@ -129,6 +129,6 @@ def test_result_cap_is_explicit_without_cutting_text(tool_data, tmp_path):
 
 def test_definitions_expose_only_current_tools_and_never_preview_override():
     definitions = KnowledgeTools.definitions()
-    assert [d['name'] for d in definitions] == ['discover_catalog', 'search_records']
+    assert [d['name'] for d in definitions] == ['discover_catalog', 'search_records', 'read_evidence']
     assert all('preview' not in d['parameters']['properties'] for d in definitions)
     assert all(d['parameters']['additionalProperties'] is False for d in definitions)

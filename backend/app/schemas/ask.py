@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.source import NonBlankText
-from app.schemas.tools import ToolRecord, ToolResponse
+from app.schemas.tools import TextEvidence, ToolRecord, ToolResponse
 
 
 class ToolCallTurn(BaseModel):
@@ -45,7 +45,7 @@ class AskError(BaseModel):
 class AskResult(BaseModel):
     status: Literal["preview_answer", "partial", "needs_clarification", "insufficient_evidence", "error"]
     answer: str | None = None
-    citations: list[ToolRecord] = Field(default_factory=list)
+    citations: list[ToolRecord | TextEvidence] = Field(default_factory=list)
     trace: list[ToolExchange] = Field(default_factory=list)
     error: AskError | None = None
     preview: bool = False

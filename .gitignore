@@ -34,6 +34,7 @@ secrets.local.*
 
 # PyCharm 配置
 .idea/
+.run/
 
 # 操作系统临时文件
 .DS_Store
