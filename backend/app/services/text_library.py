@@ -105,20 +105,23 @@ class TextLibrary:
                 raise ValueError("资料范围或审核状态与预览契约不符")
             _checked(_inside(root, source.content_path), source.content_hash or "")
             body = _checked(_inside(root, row["text_path"]), row["text_sha256"]).decode("utf-8")
-            boundaries = list(re.finditer(r"(?m)^(?:#{1,6} .+|[一二三四五六七八九十]+、[^\n]+|\d+(?:-\d+)?，[^\n]{1,80}|基础篇|身份篇)$", body))
-            starts = sorted({0, *(m.start() for m in boundaries)})
+            boundaries = list(re.finditer(r"(?m)^(?:#{1,6} [^\r\n]+|[一二三四五六七八九十]+、[^\r\n]+|\d+(?:-\d+)?，[^\r\n]{1,80}|基础篇|身份篇)\r?$", body))
+            # 仅隔离已观察到的独立推广模板，不能泛删含“微信”等词的游戏说明。
+            promotions = list(re.finditer(r"(?m)^[ \t]*微信搜索[^\r\n]{1,60}小程序[，,]更多精彩内容等你来看[~～!！。]?[ \t]*\r?$", body))
+            excluded = [(m.start(), m.end()) for m in promotions]
+            starts = sorted({0, *(m.start() for m in boundaries), *(p for span in excluded for p in span)})
             for index, start in enumerate(starts):
                 end = starts[index + 1] if index + 1 < len(starts) else len(body)
                 text = body[start:end]
-                if not text.strip():
+                if not text.strip() or any(a <= start < b for a, b in excluded):
                     continue
-                heading = next((m.group().lstrip("# ") for m in boundaries if m.start() == start), source.title)
+                heading = next((m.group().lstrip("# ").strip() for m in boundaries if m.start() == start), source.title)
                 passage = TextPassage(record_id=f"{source.source_id}:{start}", source_id=source.source_id,
                     source_url=source.source_locator, scope_id=collection.info.scope_id,
                     game_id=source.game_id, record_type="analysis", title=source.title, heading=heading,
                     text=text, start=0, end=len(text), context_hash=row["text_sha256"],
                     limitations=[collection.info.applicability, source.review_note or "社区观点，非官方规则",
-                                 row["coverage"]])
+                                 row["coverage"], *(["检索视图已排除已识别的推广行；原始及整理文件未修改。"] if excluded else [])])
                 sections.append(_Section(passage, text))
         if not sections:
             raise ValueError("配置的分析资料没有可读取正文")

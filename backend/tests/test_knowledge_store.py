@@ -16,9 +16,9 @@ from app.services.import_characters import import_character_files
 from experiments.query_samples import load_samples, discover_catalog, search_records
 
 
-def save_batch(root, source_id, game_id="a", package="包甲", text="准备阶段，摸2张牌。", mode="经典"):
+def save_batch(root, source_id, game_id="a", package="包甲", text="准备阶段，摸2张牌。", mode="经典", character="合成武将"):
     raw_path = root / f"{source_id}-raw.txt"
-    raw_path.write_text(f"合成武将\n{mode}\n武将包：{package}\n吴\n合成技能：{text}", encoding="utf-8")
+    raw_path.write_text(f"{character}\n{mode}\n武将包：{package}\n吴\n合成技能：{text}", encoding="utf-8")
     source = SourceRecord(
         source_id=source_id, title=f"合成页面-{source_id}", game_id=game_id,
         topic="合成入库测试", content_path=str(raw_path), source_type="local", source_locator=str(raw_path),
@@ -26,9 +26,9 @@ def save_batch(root, source_id, game_id="a", package="包甲", text="准备阶�
     )
     document = SourceDocument(source=source, blocks=(
         EvidenceBlock(block_id="skill", text=f"合成技能：{text}", verbatim_text=text, locator="第6行"),
-        EvidenceBlock(block_id="meta", text=f"合成武将 {mode} 武将包：{package} 吴", locator="第1至4行"),
+        EvidenceBlock(block_id="meta", text=f"{character} {mode} 武将包：{package} 吴", locator="第1至4行"),
     ))
-    data = CharacterRecord(character="合成武将", mode=mode, package_kind="武将包", package_name=package,
+    data = CharacterRecord(character=character, mode=mode, package_kind="武将包", package_name=package,
                            faction="吴", skills=[{"skill_name": "合成技能", "skill_text": text}])
     result = DataProcessor(CharacterRecord).process(document, ManualExtractor([
         {"data": data.model_dump(), "block_ids": ["skill", "meta"]},

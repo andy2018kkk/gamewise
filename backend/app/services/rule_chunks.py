@@ -6,9 +6,19 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from typing import Literal
+from urllib.parse import urlsplit
 
 from app.schemas.rule import RuleRecord
 from app.services.data_processor import ProcessingResult
+
+
+def rule_content_type(source_url: str, heading: str) -> Literal["body", "navigation"]:
+    """只识别索引页中明确命名的导引段；同页提要和正文仍保留。"""
+    section = heading.rsplit("/", 1)[-1].strip()
+    if urlsplit(source_url).path.endswith("/index.html") and section.endswith(("导引", "目录", "索引")):
+        return "navigation"
+    return "body"
 
 
 @dataclass(frozen=True)
@@ -29,7 +39,7 @@ class RuleChunk:
         return f"{self.heading}\n{self.text}"
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        return {**asdict(self), "content_type": rule_content_type(self.source_url, self.heading)}
 
 
 def split_spans(text: str, heading: str, *, max_chars: int = 350, overlap: int = 60,

@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Protocol
 
-from app.services.rule_chunks import load_rule_chunks
+from app.services.rule_chunks import load_rule_chunks, rule_content_type
 
 
 class EmbeddingProvider(Protocol):
@@ -73,13 +73,14 @@ def fuse_rankings(rankings: list[list[dict]], top_k: int, *, rank_constant: int 
 
 def search_rule_index(index_dir: Path, question: str, *, provider: EmbeddingProvider | None,
                       top_k: int = 5, method: str = "vector", category: str | None = "基础规则参考",
-                      ruleset_id: str = "sanguosha-rules-3.0") -> list[dict]:
+                      ruleset_id: str = "sanguosha-rules-3.0", include_navigation: bool = False) -> list[dict]:
     import numpy as np
     if not question.strip() or not 1 <= top_k <= 20 or method not in {"vector", "keyword", "hybrid"}:
         raise ValueError("问题、Top K或检索方式不合法")
     if method == "hybrid":
         return fuse_rankings([search_rule_index(index_dir, question, provider=provider, top_k=20,
-                    method=name, category=category, ruleset_id=ruleset_id) for name in ("keyword", "vector")], top_k)
+                    method=name, category=category, ruleset_id=ruleset_id,
+                    include_navigation=include_navigation) for name in ("keyword", "vector")], top_k)
     metadata = json.loads((index_dir / "index.json").read_text(encoding="utf-8"))
     if metadata["format"] != 1:
         raise ValueError("索引格式不兼容")
@@ -87,8 +88,14 @@ def search_rule_index(index_dir: Path, question: str, *, provider: EmbeddingProv
         if hashlib.sha256((index_dir / filename).read_bytes()).hexdigest() != metadata[key]:
             raise ValueError("索引文件已变化，请重建")
     chunks = json.loads((index_dir / "chunks.json").read_text(encoding="utf-8"))
-    selected = [(i, c) for i, c in enumerate(chunks) if c["ruleset_id"] == ruleset_id
-                and (category is None or c["category"] == category)]
+    selected = []
+    for i, chunk in enumerate(chunks):
+        if chunk["ruleset_id"] != ruleset_id or (category is not None and chunk["category"] != category):
+            continue
+        # 老索引可直接按现有来源/标题分类，向量与片段位置不变，无须重新编码。
+        content_type = rule_content_type(chunk["source_url"], chunk["heading"])
+        if include_navigation or content_type == "body":
+            selected.append((i, {**chunk, "content_type": content_type}))
     if method == "vector":
         if provider is None:
             raise ValueError("向量检索需要已加载的本地模型")

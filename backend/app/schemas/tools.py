@@ -11,22 +11,36 @@ from app.schemas.source import NonBlankText
 class CatalogArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    game_ids: list[NonBlankText] | None = Field(default=None, min_length=1, max_length=12)
-    character: NonBlankText | None = None
-    package_name: NonBlankText | None = None
+    game_ids: list[NonBlankText] | None = Field(default=None, min_length=1, max_length=12,
+        description="仅skill使用：程序允许的发行分支ID。rule/analysis必须省略此字段。")
+    character: NonBlankText | None = Field(default=None, description="仅skill：具体武将条目名，不把界/谋等当别名。")
+    package_name: NonBlankText | None = Field(default=None, description="仅skill：目录中的武将包名，不是模式。")
     faction: NonBlankText | None = None
-    record_type: Literal["skill", "rule", "analysis"] = "skill"
+    record_type: Literal["skill", "rule", "analysis"] = Field(default="skill",
+        description="skill查武将技能，rule查机制规则，analysis查社区策略。文本目录仅传本字段。")
+    include_related: bool = Field(default=False,
+        description="仅discover_catalog：人物比较未指定系列时设true，并传character作为人物名，发现有来源的系列候选；明确系列用false。不能和包/势力筛选或文本类型组合。")
+
+    @model_validator(mode="after")
+    def validate_related_discovery(self) -> Self:
+        if self.include_related and (self.record_type != "skill" or self.character is None
+                                     or self.package_name is not None or self.faction is not None):
+            raise ValueError("关联发现须指定人物character和skill类型，不接受包/势力或文本筛选")
+        return self
 
 
 class SearchArguments(CatalogArguments):
     skill_name: NonBlankText | None = None
-    mode: NonBlankText | None = None
-    scope_id: NonBlankText | None = None
-    query: NonBlankText | None = None
-    top_k: int = Field(default=3, ge=1, le=5)
+    mode: NonBlankText | None = Field(default=None, description="仅skill：使用目录返回的准确模式名。")
+    scope_id: NonBlankText | None = Field(default=None,
+        description="仅rule/analysis且必填：先discover_catalog(record_type=对应类型)，复制实际返回的scope_id，不自行编造。")
+    query: NonBlankText | None = Field(default=None, description="仅rule/analysis且必填：搜索问题或关键词。")
+    top_k: int = Field(default=3, ge=1, le=5, description="仅rule/analysis设置返回片段数1–5；skill查询省略。")
 
     @model_validator(mode="after")
     def require_filter(self) -> Self:
+        if self.include_related:
+            raise ValueError("关联仅用于目录发现；技能查询须逐个使用具体条目")
         if self.record_type != "skill":
             if self.scope_id is None or self.query is None:
                 raise ValueError("文本查询须提供范围编号和搜索问题")
@@ -41,7 +55,7 @@ class SearchArguments(CatalogArguments):
         return self
 
     def filters(self) -> QueryFilters:
-        return QueryFilters(**self.model_dump(exclude={"game_ids", "record_type", "scope_id", "query", "top_k"}))
+        return QueryFilters(**self.model_dump(exclude={"game_ids", "record_type", "scope_id", "query", "top_k", "include_related"}))
 
 
 class ReadEvidenceArguments(BaseModel):
@@ -83,10 +97,34 @@ class ToolRecord(SampleRecord):
     citation_id: str
 
 
+class RelationSource(BaseModel):
+    source_url: str
+    revision: int
+    lines: list[int]
+
+
+class FamilyCandidate(BaseModel):
+    character: str
+    modes: list[str]
+    packages: list[str]
+    skill_count: int
+    coverage: Literal["loaded", "not_loaded"]
+
+
+class FamilyDiscovery(BaseModel):
+    person: str
+    status: Literal["registered", "not_registered", "conflict"]
+    source: RelationSource | None = None
+    candidates: list[FamilyCandidate] = Field(default_factory=list)
+    review_status: Literal["pending"] = "pending"
+    coverage_note: str = "仅覆盖本地已解析的关联行，不代表完整系列、线上最新或上线状态。"
+
+
 class ToolScopeResult(BaseModel):
     game_id: str
     status: Literal["catalog_available", "preview_available", "pending_review", "no_match_in_loaded_data", "not_loaded"]
     catalog: CatalogItem | None = None
+    family: FamilyDiscovery | None = None
     records: list[ToolRecord | TextEvidence] = Field(default_factory=list)
     scope: TextScopeInfo | None = None
     has_more: bool = False

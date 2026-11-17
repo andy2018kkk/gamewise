@@ -60,6 +60,23 @@ def test_keyword_no_match_and_invalid_inputs(index):
             search_rule_index(root, question, provider=provider, top_k=top_k)
 
 
+def test_navigation_is_filtered_before_ranking_without_losing_body_on_index_page(tmp_path, monkeypatch):
+    chunks = [RuleChunk("nav", "nav", "s", "https://example.com/glossary/index.html",
+                        "sanguosha-rules-3.0", "基础规则参考", "用语 / 用语导引", "主公 体力上限", 0, 7),
+              RuleChunk("body", "body", "s", "https://example.com/flow/index.html",
+                        "sanguosha-rules-3.0", "基础规则参考", "流程 / 本部分提要", "主公的规则正文。", 0, 8)]
+    monkeypatch.setattr("app.services.rule_search.load_rule_chunks", lambda *a, **kw: chunks)
+    provider = FakeEmbedding()
+    write_rule_index(tmp_path, tmp_path / "index", provider, provider.identity)
+    for method in ("keyword", "vector", "hybrid"):
+        hits = search_rule_index(tmp_path / "index", "主公 体力上限", provider=provider, method=method, top_k=1)
+        assert [h["chunk_id"] for h in hits] == ["body"]
+        assert hits[0]["content_type"] == "body"
+    diagnostic = search_rule_index(tmp_path / "index", "主公 体力上限", provider=None,
+                                   method="keyword", top_k=1, include_navigation=True)
+    assert diagnostic[0]["chunk_id"] == "nav"
+
+
 def test_fusion_deduplicates_shared_hits_and_uses_rank_not_incompatible_scores():
     keyword = [{"chunk_id": "a", "score": 1.0}, {"chunk_id": "b", "score": 0.5}]
     vector = [{"chunk_id": "b", "score": 0.99}, {"chunk_id": "c", "score": 0.98}]

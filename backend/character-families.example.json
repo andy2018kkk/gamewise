@@ -1,0 +1,8 @@
+{
+  "catalog_review": "../data/local/sgs-catalog.local/catalog-review.json",
+  "branch_game_ids": {
+    "sgsol": "sanguosha-ol",
+    "sgs": "sanguosha-shizhounian",
+    "msgs": "sanguosha-mobile"
+  }
+}
