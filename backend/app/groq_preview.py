@@ -174,11 +174,11 @@ def main() -> None:
         parser.error("--finalize-only必须配合--resume-report，不能跳过资料获取")
     args.output_dir = args.output_dir or WORKSPACE / "data/local/tool-preview.local" / ("groq-real-case-3" if args.case == "ol-comparison" else "groq-synthetic")
     try:
-        settings = GroqSettings.from_file(args.env_file)
-    except (OSError, ValueError):
-        parser.error("无法读取本地Groq配置；未发送请求，未显示配置内容")
-    if args.model:
-        settings = settings.model_copy(update={"model": args.model})
+        settings = GroqSettings.from_file(args.env_file, model=args.model)
+    except OSError:
+        parser.error("无法读取本地Groq配置文件；未发送请求，未显示配置内容")
+    except ValueError:
+        parser.error("模型或密钥配置缺失/无效：请通过--model或GROQ_MODEL指定模型，并设置GROQ_API_KEY；未发送请求")
     if args.case == "ol-comparison":
         if settings.model not in {"openai/gpt-oss-120b", "qwen/qwen3.8-27b"}:
             parser.error("真实案例只允许已确认的GPT-OSS或Qwen模型；未发送请求")

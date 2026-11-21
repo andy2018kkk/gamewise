@@ -21,8 +21,8 @@ class GroqSettings(BaseModel):
     model: str = Field(min_length=1)
 
     @classmethod
-    def from_file(cls, path: Path) -> "GroqSettings":
-        """只读两项简单KEY=VALUE配置，不执行变量、命令或打印文件。"""
+    def from_file(cls, path: Path, *, model: str | None = None) -> "GroqSettings":
+        """密钥只读本地；本次指定模型优先于文件默认值，不修改文件。"""
         values: dict[str, str] = {}
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
@@ -34,9 +34,12 @@ class GroqSettings(BaseModel):
                 if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                     value = value[1:-1]
                 values[key.strip()] = value
-        if not values.get("GROQ_API_KEY") or not values.get("GROQ_MODEL"):
-            raise ValueError("本地配置缺少GROQ_API_KEY或GROQ_MODEL")
-        return cls(api_key=values["GROQ_API_KEY"], model=values["GROQ_MODEL"])
+        if not values.get("GROQ_API_KEY"):
+            raise ValueError("本地配置缺少GROQ_API_KEY")
+        selected_model = model.strip() if model is not None else values.get("GROQ_MODEL", "").strip()
+        if not selected_model:
+            raise ValueError("未指定模型：请使用--model或在本地配置中设置GROQ_MODEL")
+        return cls(api_key=values["GROQ_API_KEY"], model=selected_model)
 
 
 class RequestUsage(BaseModel):
