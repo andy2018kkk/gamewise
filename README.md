@@ -1,95 +1,55 @@
 # GameWise AI
 
-本地运行、基于资料证据的游戏问答助手。首批聚焦三国杀 OL、十周年、移动版的武将系列技能；魂系保留已有成果并延后。
+面向多游戏、多版本的本地 AI 攻略助手，围绕技能查询、机制解释和版本比较提供带来源的回答。首批 MVP 以三国杀 OL、十周年、移动版验证流程；其他游戏尚未接入当前问答。
 
-**当前为本地 MVP 原型。** 仓库提供代码、配置示例和合成测试，不包含 API 密钥、真实资料正文、SQLite 数据库、向量索引或模型文件；实际资料问答需要另行准备这些本地资源。已知限制包括模型可能曲解技能、追问可能未补查或未正确关联引用，以及服务商限流/请求大小限制。引用可追溯不等于结论已验证；规则向量与融合检索保留实验，当前在线使用结构化查询与主题/关键词检索。
+**当前为可运行原型。** 仓库提供代码、配置示例及合成测试，不包含密钥、真实资料正文、SQLite 数据库、向量索引或模型文件。下载代码后需另行准备本地资料，才能体验实际游戏问答。
 
-按 Day 记录阶段要点，不记录每轮讨论。Day 表示实施阶段，不是自然日。仅在阶段成果或关键决定变化时合并更新本页。
+## 核心功能
 
-## Day 1：本地前后端连通
+- **资料处理：** 统一处理入口与各来源解析适配，支持结构校验、快照留存和重复导入检查。
+- **按范围查询：** 按发行分支、武将条目与玩法模式查技能，武将包与模式分别记录。
+- **工具调用问答：** 模型自主选择目录发现、技能查询、规则/策略检索或原文补读，程序负责受控执行。
+- **网页交互：** 支持 Markdown、来源原文和查询过程展示；简短追问携带最近两轮成功问答，刷新或“新对话”清空记录。
 
-**状态：已完成，用户已验收。**
+## 技术方案
 
-- 前端使用 React + TypeScript + Vite，后端使用 Python + FastAPI，实现网页检查 `/health` 并显示连接状态。
-- 后端 pytest 2 项、前端 Vitest 8 项通过；类型检查与构建通过，用户实际验证启动、断开和恢复。尚无自动端到端测试套件。
-- 完成本地 Git 分支与 Commit 练习，骨架存档为 `9979a6e`。
+| 部分 | 当前实现 |
+| --- | --- |
+| 前端 | React、TypeScript、Vite；react-markdown、remark-gfm 排版 |
+| 后端 | Python、FastAPI、Pydantic |
+| 技能资料 | SQLite 结构化查询，保留来源和快照归属 |
+| 规则与策略 | 主题/关键词检索，按需返回原文片段 |
+| 模型调用 | Groq API、原生 Tool Calling；网页当前使用 Qwen |
+| 自动测试 | pytest、Vitest、模型与 HTTP 测试替身 |
 
-## Day 2：资料获取、处理与问答方向
+问答主链路：网页 → FastAPI → 问答循环 → 模型选择工具 → 本地资料查询 → 模型回答 → 答案与来源展示。
 
-**状态：阶段成果已保留，后续批量处理见Day 3，当前状态见PLAN。**
+本地多语言 E5 向量检索、关键词/向量 RRF 融合已开展小规模对照实验，**尚未接入网页主流程**；未证明某种检索方式对所有问题最优。
 
-- **取得源数据**：通过 BWIKI MediaWiki API 读取三服候选目录，共 2,136 页，非全量技能。已处理三服孙坚及 OL 谋孙坚的小批真实样本，保留原始 JSON/HTML；魂系早期清单成果保留。
-- **建立处理与存取流程**：Python 解析网页，Pydantic 校验，`DataProcessor` 整理 JSON/Markdown，SQLite 五表保存。各服读取规则复用统一输出，支持按服、模式、武将、技能、包和势力查询；重复导入不新增，错误整批回滚。同文不同模式仍分开，真实 LLM 未接入。
-- **确定 ReAct + RAG 方向**：LLM 理解问题并选择受控查询工具，从知识库取得证据后回答。未指定服默认分别查三服；系列、模式分别处理，缺资料不补造。主观评价必须区分事实和观点。真实LLM自主调用尚未接入，ReAct 与前端 React 不同。
-- **验证与限制**：阶段小样本为三服孙坚及 OL 谋孙坚，JSON/SQLite 对照和范围隔离通过。用户核实经典等标题为模式；正式规则适用期、资料使用及标签仍待审，非完整知识库。
-- **后续衔接**：批量采集、规则及工具预览已继续推进；接下来完成真实模型与网页问答，具体待办见PLAN。
+## 本地运行
 
-## Day 3：批量整理与导入
+以下命令适用于 Windows PowerShell。需要 Python、Node.js/npm；完整的新环境恢复安装尚未验证。
 
-**状态：目录采集完成，首轮提取收尾完成，待用户审查。**
+### 1. 准备环境与配置
 
-- 从三服小批样本扩大到冻结目录全部页面，MediaWiki API低频下载，保留原始快照、指纹与断点；HTTP 567持续退避等待，下载与解析分开统计。
-- 复用各服解析、DataProcessor校验和SQLite待审导入，集中修复新式面板、图片技能名与重复显示。保持历史、台词、不同服及模式隔离，源页面空缺如实保留。
-- 按武将卡思路沿用现有表和字段，已补齐原文明示获得的额外技能效果，获得条件仍读基础技能；同名状态变化及玩法混排保留缺口。具体覆盖、测试及审阅入口见PLAN，不将采集完成称为正式知识库完成。
-- 武将资料进入SQLite待审库；56页规则与10篇分析参考已保存并保留缺口。规则已有E5、关键词及组合检索实验；三个统一工具可查技能、规则与分析并补读，虚拟模型往返已验证。后续真实模型进展见Day 7，不等于正式游戏问答。
-
-## Day 7：真实模型小规模验证
-
-**状态：真实模型流程及最小网页已接通，网页待用户验收；资料准入、答案质量及评测仍有待办，见PLAN。**
-
-- 用现有httpx接Groq，复用四个知识工具与问答循环；模型原生选择工具或直接成文，程序检查查询范围与引用，不要求额外结束工具或固定人物流程。
-- Qwen/GPT-OSS真实案例已有完整工具往返和回答，仍存在技能曲解、系列分析不全及限流；不把单例改善称为稳定准确率提升。规则向量检索保留实验，当前问答文章搜索使用主题与关键词。
-- 网页展示问答记录、Markdown答案、编号来源原文与简短查询过程，POST /api/ask复用通用入口。支持带最近两轮成功问答的简短追问；刷新或新对话清空，旧工具结果不跨轮复用。网页使用已批准Qwen，密钥、数据库及资料配置留在后端；真实网页追问待用户验收。
-
-## 文件结构与阅读顺序
-
-```text
-frontend/src/              健康状态、问题输入、答案与来源展示
-backend/
-  app/
-    main.py                Web服务入口，/health与POST /api/ask
-    manage.py              本地导入、查询命令入口
-    groq_preview.py        终端问答入口，仅接收问题与允许查询的服
-    ask_runtime.py         接收问题和配置，装配通用问答循环
-    schemas/               资料、工具、模型动作的字段与校验
-    services/              处理、导入、检索、工具执行和问答循环
-    repositories/          SQLite存取
-    providers/             embedding、Groq适配、模型说明与替身
-  experiments/             采集解析、历史实验与对照，部分仍用于主流程
-  tests/                   合成资料的自动测试
-  catalog.json             三服登记配置
-  text-collections.example.json  本地文本范围示例
-data/local/                原始资料、数据库、索引、模型及报告，不进Git
-evals/datasets/            当前规则检索开发题，不是正式独立评测集
-docs/                     需求、长期背景及数据设计
-AGENTS.md / PLAN.md        协作规范及当前计划
-```
-
-理解当前主流程可依次看：groq_preview.py → ask_runtime.py → services/ask.py → services/knowledge_tools.py → text_library.py或repositories/knowledge.py。问题原样传入，模型自主选择工具，程序查询与校验后返回结果。
-
-experiments里的批量采集依赖preview_bwiki、preview_characters等解析代码，旧JSON查询仍用于SQLite对照测试，不能按“实验”名字直接删。将来收敛采集入口时再迁移；目前不做大范围移动。个人.run配置与依赖、缓存不进Git；历史原文和模型保留本地。
-
-Git Commit保存代码、文档、测试及配置示例，Push才会把这些提交备份到GitHub。真实资料和SQLite不随Commit/Push上传；本地数据检查点位于data/local/checkpoints.local，最新回执为latest.json。这个同电脑快照便于恢复，不等于异地备份；模型文件不重复打包。
-
-## 本地启动与检查
-
-终端模型选择：命令行`--model`优先；省略时读取根目录`.env`的`GROQ_MODEL`。两处都没有就报错，不自动选择。密钥仍须在本地配置`GROQ_API_KEY`；命令指定模型不修改配置文件。网页首版按用户批准使用`qwen/qwen3.8-27b`，不受终端默认模型影响，也不修改.env；只有点击发送才调用外部模型。
-
-<details>
-<summary>查看终端模型问答入口</summary>
-
-在backend运行。以下命令会调用外部模型，实际执行前仍需确认模型、资料发送范围及费用：
+在项目根目录按需准备依赖；已有环境不必重复创建：
 
 ```powershell
-..\.venv\Scripts\python.exe -m app.groq_preview --run-remote --model qwen/qwen3.8-27b --game sanguosha-ol --question "你的问题"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+npm.cmd --prefix frontend ci
 ```
 
-需要本地模型配置、数据库及文章资料。模型自主选择查询工具和搜索词，不预置人物、策略或旧结果；调用及答案保存到data/local/tool-preview.local/groq-question。尚未完成通用入口真实模型验收，离线通过不等于实际答案正确。
+参照 [.env.example](.env.example) 在根目录配置 `.env`，填写 `GROQ_API_KEY`；已有密钥文件不要覆盖或提交。网页当前指定 `qwen/qwen3.8-27b`，终端入口则支持 `--model` 优先于 `.env` 的 `GROQ_MODEL`。
 
-</details>
+实际问答还需本地数据库 `data/local/knowledge.local/gamewise.sqlite3` 及下列配置所指向的资料：
 
-<details>
-<summary>需要运行时展开</summary>
+- [text-collections.example.json](backend/text-collections.example.json)：规则索引、策略原文及主题映射。
+- [character-families.example.json](backend/character-families.example.json)：人物与系列关联。
+
+这些是本地路径配置，不是随仓库附送的知识库；资料处理方式见 [数据设计](docs/DATA_DESIGN.md)。
+
+### 2. 启动服务
 
 在项目根目录启动后端，保持终端运行：
 
@@ -97,23 +57,27 @@ Git Commit保存代码、文档、测试及配置示例，Push才会把这些提
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-另开终端，在 `frontend` 目录启动前端：
+另开终端，在项目根目录启动前端：
 
 ```powershell
-npm.cmd run dev
+npm.cmd --prefix frontend run dev
 ```
 
-访问 [本地网页](http://127.0.0.1:5173/)；后端接口为 [health](http://127.0.0.1:8000/health)。按 Ctrl+C 停止对应服务。
+打开 [本地网页](http://127.0.0.1:5173/)。只有点击发送才会调用模型，将问题、最近两轮成功问答及本次查询资料发送至 Groq，消耗账号额度，可能产生费用。按 Ctrl+C 停止对应服务。
 
-网页问答验收：输入问题并发送，检查等待时不能重复发送或清空对话；回答中的[1]等对应该条回答下方来源，展开可看原文及查询过程。接着问“他有哪些缺点”等短问题，确认能结合上文理解；再明确切换服或人物，确认不沿用旧范围。每次仅发送最近两轮成功问答文字，旧技能全文/工具记录不重复追加，较早消息仍可见但不传入模型；历史不是核验事实，当前事实仍需取证。点击新对话或刷新页面清空全部消息，不保存聊天文件。失败轮不作为上下文；限流/超时不会额外重跑整题。单轮很长时仍可能413；真实网页追问待用户验收，替身测试不等于真实模型效果或自动端到端实测。
+接口：`GET /health` 检查服务存活，`POST /api/ask` 接收问题与最多两轮历史文字；密钥和资料路径仅由后端读取。
 
-测试需主动执行，不会随服务启动自动运行。在 `backend` 目录：
+## 测试与其他入口
+
+测试须主动执行，不会随启动自动运行，默认使用替身、不调用真实模型。规则索引相关测试还需要已安装 NumPy（版本见可选依赖文件）；不需要为普通接口测试下载 embedding 模型。
+
+在 `backend` 目录运行后端检查：
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pytest -q
 ```
 
-在 `frontend` 目录：
+在 `frontend` 目录运行前端检查：
 
 ```powershell
 npm.cmd run typecheck
@@ -121,47 +85,46 @@ npm.cmd run test
 npm.cmd run build
 ```
 
-在 `backend` 目录处理本机已有的孙坚快照，不联网：
+<details>
+<summary>终端问答、数据库查询与检索实验</summary>
+
+以下从 `backend` 目录运行。终端问答会调用外部模型，同样需要密钥、本地资料及已确认的使用范围：
 
 ```powershell
-..\.venv\Scripts\python.exe -m experiments.process_bwiki ../data/local/sgs-preview.local ../data/local/processor-preview.local
+..\.venv\Scripts\python.exe -m app.groq_preview --run-remote --model qwen/qwen3.8-27b --game sanguosha-ol --question "你的问题"
 ```
 
-需要本地已有快照，预期生成 5 条待审记录。实验脚本使用模块启动；PyCharm 可选择“GameWise 处理三国杀样本”。本地真实资料位于 `data/local/*.local` 目录，不作为已提交资料或正式知识覆盖。
-
-在 `backend` 目录使用本地 SQLite（不联网、不接 LLM）：
+只读查看本地数据库，不调用模型：
 
 ```powershell
 ..\.venv\Scripts\python.exe -m app.manage stats
 ..\.venv\Scripts\python.exe -m app.manage query --game sanguosha-ol --character 孙坚 --mode 1V1版本
 ```
 
-数据库在 `data/local/knowledge.local/gamewise.sqlite3`，已导入现有样本。重新导入用 `..\.venv\Scripts\python.exe -m app.manage import-samples`，重复执行不新增；需要已有 characters.json 及原始快照。查询目录可用 `query --package 国战标准 --catalog`，技能反查可用 `query --skill 英魂`。结果 `answerable: false` 表示待审预览，不是报错。旧 JSON 查询保留为开发对照，日常验收使用 app.manage。
-
-</details>
-
-<details>
-<summary>本地规则检索实验（模型已下载后使用）</summary>
-
-在backend目录，用项目Python运行；只返回规则原文，不生成答案、不调用收费API：
+可选规则检索实验需要 [额外依赖](backend/requirements-embedding.txt)、本地模型及索引；查询不会自动下载模型：
 
 ```powershell
-..\.venv\Scripts\python.exe -m app.rule_retrieval query "失去体力" --top-k 5
-..\.venv\Scripts\python.exe -m app.rule_retrieval query "失去体力" --top-k 5 --method keyword
-..\.venv\Scripts\python.exe -m app.rule_retrieval evaluate
 ..\.venv\Scripts\python.exe -m app.rule_retrieval --index-dir ../data/local/embedding-preview.local/index-v2 query "失去体力和受伤的区别" --method hybrid --top-k 5
 ```
 
-模型、索引和逐题报告在data/local/embedding-preview.local/。新环境先按backend/requirements-embedding.txt安装可选CPU依赖；模型下载需按已确认方案显式准备，查询不会自动下载。当前是开发实验，分数不是正确概率，范围外问题可能误召回，未完成正式问答验收。
-
 </details>
 
-## 文档分工
+## 已知限制
 
-| 文档 | 只记录什么 |
-| --- | --- |
-| [PLAN.md](PLAN.md) | 当前进度、下一步、14 阶段安排 |
-| [PRD.md](docs/PRD.md) | 产品需求与验收边界 |
-| [PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | 长期背景及关键决策 |
-| [AGENTS.md](AGENTS.md) | 开发与合作规则 |
-| [DATA_DESIGN.md](docs/DATA_DESIGN.md) | 按需查阅的字段、关系及工具设计草案 |
+- 真实资料仍为待审预览，不代表三服全量覆盖、线上最新或已完成正式资料准入；历史规则和社区观点不自动适用于所有服。
+- 模型仍可能曲解技能、遗漏系列或跳过必要查询；引用归属检查不等于语义事实校验，追问中的引用关联也可能不完整。
+- 平台限流（HTTP 429）和请求过大（HTTP 413）可能中断问答；两轮上下文窗口不保证长内容不会超限。
+- 自动测试验证程序行为，不等于真实模型效果或完整端到端验收；现有探索性对照不能支撑准确率提升的量化结论。
+
+## 项目结构与文档
+
+```text
+frontend/src/             问答页面、请求方法与展示组件
+backend/app/              API、问答装配、资料处理、检索、模型适配与存储
+backend/tests/            离线自动测试与合成资料
+backend/experiments/      采集解析与历史实验，部分仍被现有入口复用
+data/local/               本机资料、数据库、索引、模型与报告，不随代码提交
+evals/datasets/           检索开发题集
+```
+
+[产品需求](docs/PRD.md) · [数据与工具设计](docs/DATA_DESIGN.md) · [长期背景](docs/PROJECT_CONTEXT.md) · [计划与进度](PLAN.md) · [开发规范](AGENTS.md)
