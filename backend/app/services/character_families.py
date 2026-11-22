@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.repositories.knowledge import KnowledgeRepository
 from app.schemas.query import CatalogItem
+from app.schemas.query import SamePageRelation
 from app.schemas.tools import FamilyCandidate, FamilyDiscovery, RelationSource
 
 
@@ -82,12 +83,18 @@ class CharacterFamilies:
             family.status = "conflict"
             return exact, family
         family.status = "registered"
+        supplements: dict[str, list[SamePageRelation]] = {}
+        for relation in repository.same_page_relations(game_id, list(group.members)):
+            if relation.character not in group.members:
+                supplements.setdefault(relation.character, []).append(relation)
+        members = (*group.members, *sorted(supplements))
         catalogs = []
-        for member in group.members:
+        for member in members:
             item = repository.discover_catalog(game_ids=[game_id], character=member)[0]
             catalogs.append(item)
             family.candidates.append(FamilyCandidate(character=member, modes=item.modes, packages=item.packages,
-                skill_count=item.record_count, coverage="loaded" if item.record_count else "not_loaded"))
+                skill_count=item.record_count, coverage="loaded" if item.record_count else "not_loaded",
+                same_page_evidence=supplements.get(member, [])))
         return exact.model_copy(update={
             "characters": sorted({c for item in catalogs for c in item.characters}),
             "modes": sorted({m for item in catalogs for m in item.modes}),

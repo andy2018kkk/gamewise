@@ -17,6 +17,52 @@
       "game_id": "sanguosha",
       "applicability": "历史社区分析观点，不是官方规则、现行排名或实测胜率；具体文章模式和缺口分别保留，仅本地待审预览。"
     },
-    "path": "../data/local/analysis-reference.local/originals"
+    "path": "../data/local/analysis-reference.local/originals",
+    "article_topics": {
+      "analysis-a01-original": [
+        "收益",
+        "配合"
+      ],
+      "analysis-a02-original": [
+        "身份",
+        "配合"
+      ],
+      "analysis-a03-original": [
+        "蓄爆",
+        "节奏"
+      ],
+      "analysis-a04-original": [
+        "嘲讽",
+        "身份",
+        "收益"
+      ],
+      "analysis-a05-original": [
+        "收益",
+        "强度",
+        "配合"
+      ],
+      "analysis-a06-original": [
+        "收益",
+        "强度"
+      ],
+      "analysis-a07-original": [
+        "收益",
+        "强度",
+        "配合"
+      ],
+      "analysis-a08-original": [
+        "收益",
+        "强度",
+        "身份"
+      ],
+      "analysis-a09-original": [
+        "收益",
+        "强度"
+      ],
+      "analysis-a10-original": [
+        "身份",
+        "配合"
+      ]
+    }
   }
 ]

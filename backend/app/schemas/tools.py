@@ -4,7 +4,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.schemas.query import CatalogItem, QueryFilters, SampleRecord
+from app.schemas.query import CatalogItem, QueryFilters, SampleRecord, SamePageRelation
 from app.schemas.source import NonBlankText
 
 
@@ -29,7 +29,17 @@ class CatalogArguments(BaseModel):
         return self
 
 
+class SkillTarget(BaseModel):
+    """一次批量读取中的明确目标，不自动展开人物系列或猜测模式。"""
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    game_id: NonBlankText = Field(description="程序允许的独立发行分支ID，不是游戏显示名称。")
+    character: NonBlankText = Field(description="具体武将条目名，使用目录返回值，不自动展开人物系列。")
+    mode: NonBlankText = Field(description="明确的玩法模式；同名武将在其他模式的技能不并入。")
+
+
 class SearchArguments(CatalogArguments):
+    targets: list[SkillTarget] | None = Field(default=None, min_length=1, max_length=10,
+        description="仅skill批量读取：1–10个明确的game_id、character、mode目标。与单查字段互斥，不自动展开系列。")
     skill_name: NonBlankText | None = None
     mode: NonBlankText | None = Field(default=None, description="仅skill：使用目录返回的准确模式名。")
     scope_id: NonBlankText | None = Field(default=None,
@@ -40,7 +50,15 @@ class SearchArguments(CatalogArguments):
     @model_validator(mode="after")
     def require_filter(self) -> Self:
         if self.include_related:
-            raise ValueError("关联仅用于目录发现；技能查询须逐个使用具体条目")
+            raise ValueError("关联仅用于目录发现；技能查询使用具体条目或targets，不设置include_related")
+        if self.targets is not None:
+            if self.record_type != "skill" or self.top_k != 3 or any(getattr(self, key) is not None for key in
+                    ("game_ids", "character", "skill_name", "package_name", "faction", "mode", "scope_id", "query")):
+                raise ValueError("targets仅用于skill，不与单查或文本字段混用")
+            identities = [(t.game_id, t.character, t.mode) for t in self.targets]
+            if len(set(identities)) != len(identities):
+                raise ValueError("批量目标重复")
+            return self
         if self.record_type != "skill":
             if self.scope_id is None or self.query is None:
                 raise ValueError("文本查询须提供范围编号和搜索问题")
@@ -55,12 +73,36 @@ class SearchArguments(CatalogArguments):
         return self
 
     def filters(self) -> QueryFilters:
-        return QueryFilters(**self.model_dump(exclude={"game_ids", "record_type", "scope_id", "query", "top_k", "include_related"}))
+        return QueryFilters(**self.model_dump(exclude={"game_ids", "record_type", "scope_id", "query", "top_k", "include_related", "targets"}))
 
 
 class ReadEvidenceArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     citation_id: NonBlankText
+
+
+class CharacterSkillsArguments(BaseModel):
+    """模型只给想看的武将和必要筛选；不填写文章搜索字段。"""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    characters: list[NonBlankText] = Field(min_length=1, max_length=10, description="人物名或具体武将名，一个或多个；人物名自动展开该服已登记系列，具体系列精确查询，无须先查目录。")
+    game_ids: list[NonBlankText] | None = Field(default=None, min_length=1, max_length=12,
+        description="可选发行分支，省略时分别查程序允许的服。")
+    mode: NonBlankText | None = Field(default=None, description="可选玩法模式；省略时保留各模式标签分别返回，不混为同一技能。")
+
+
+class ReferenceSearchArguments(BaseModel):
+    """搜索文章只表达类型、主题及问题；内部集合由程序选择。"""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["规则", "策略"] = Field(description="规则查机制/结算；策略查收益、身份、配合等社区分析。")
+    topic: NonBlankText | None = Field(default=None,
+        description="推荐：收益、身份、配合、强度、技能结算；也可填写其他主题。")
+    query: NonBlankText | None = Field(default=None, description="可选自然语言问题或关键词，与topic共同检索。策略按已读技能提炼的机制/收益/代价/身份概念搜索，不填武将名寻找排名；规则按结算问题搜索。可只选主题。")
+
+    @model_validator(mode="after")
+    def require_search(self) -> Self:
+        if self.topic is None and self.query is None:
+            raise ValueError("请选择主题或填写搜索问题")
+        return self
 
 
 class TextScopeInfo(BaseModel):
@@ -84,6 +126,7 @@ class TextPassage(BaseModel):
     end: int
     context_hash: str
     limitations: list[str]
+    topics: list[str] = Field(default_factory=list)
     truncated: bool = False
     review_status: Literal["pending"] = "pending"
     answerable: Literal[False] = False
@@ -109,6 +152,7 @@ class FamilyCandidate(BaseModel):
     packages: list[str]
     skill_count: int
     coverage: Literal["loaded", "not_loaded"]
+    same_page_evidence: list[SamePageRelation] = Field(default_factory=list)
 
 
 class FamilyDiscovery(BaseModel):
@@ -117,11 +161,12 @@ class FamilyDiscovery(BaseModel):
     source: RelationSource | None = None
     candidates: list[FamilyCandidate] = Field(default_factory=list)
     review_status: Literal["pending"] = "pending"
-    coverage_note: str = "仅覆盖本地已解析的关联行，不代表完整系列、线上最新或上线状态。"
+    coverage_note: str = "关联来自本地消歧义行及同页明确提取的条目，不代表完整系列、线上最新或上线状态。"
 
 
 class ToolScopeResult(BaseModel):
     game_id: str
+    target: SkillTarget | None = None
     status: Literal["catalog_available", "preview_available", "pending_review", "no_match_in_loaded_data", "not_loaded"]
     catalog: CatalogItem | None = None
     family: FamilyDiscovery | None = None

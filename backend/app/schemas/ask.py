@@ -8,6 +8,13 @@ from app.schemas.source import NonBlankText
 from app.schemas.tools import TextEvidence, ToolRecord, ToolResponse
 
 
+class ConversationTurn(BaseModel):
+    """一轮历史文字，仅用于理解追问，不作为本轮已核验的资料。"""
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    question: NonBlankText
+    answer: NonBlankText
+
+
 class ToolCallTurn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -22,7 +29,7 @@ class FinalAnswerTurn(BaseModel):
 
     kind: Literal["final"] = "final"
     status: Literal["answered", "partial", "needs_clarification", "insufficient_evidence"]
-    answer: NonBlankText
+    answer: NonBlankText = Field(description="给普通玩家的自然中文回答；直接回应问题，保留来源引用和必要限制，不展示程序字段、状态码或调试过程。")
     citation_ids: list[NonBlankText] = Field(default_factory=list)
 
 

@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       proxy: {
+        '^/api/ask$': {
+          target: env.BACKEND_URL || 'http://127.0.0.1:8000',
+          proxyTimeout: 310000,
+        },
         '^/health$': {
           target: env.BACKEND_URL || 'http://127.0.0.1:8000',
           proxyTimeout: 5000,

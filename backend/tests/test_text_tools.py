@@ -213,3 +213,82 @@ def test_rule_scope_reuses_index_filtering_and_original_context(tmp_path):
     assert hit.record_id == "c" and hit.record_type == "rule"
     context = session.invoke("read_evidence", json.dumps(dict(citation_id=hit.citation_id)))
     assert context.results[0].records[0].text == "主公规则。"
+
+
+def test_reference_topic_and_question_both_reach_search(tmp_path, library, monkeypatch):
+    original = library.search
+    calls = []
+    def observed(scope_id, record_type, query, top_k, **options):
+        calls.append((scope_id, record_type, query, options))
+        return original(scope_id, record_type, query, top_k, **options)
+    monkeypatch.setattr(library, "search", observed)
+    tools = KnowledgeTools(tmp_path / "unused.sqlite3", ["a"], preview=True, text_library=library)
+    topic = tools.invoke("search_reference", '{"kind":"策略","topic":"身份"}')
+    assert topic.error is None and any(s.records for s in topic.results)
+    assert "主公" in calls[-1][2] and calls[-1][1] == "analysis"
+    tools = KnowledgeTools(tmp_path / "unused.sqlite3", ["a"], preview=True, text_library=library)
+    custom = tools.invoke("search_reference", '{"kind":"策略","topic":"身份","query":"主公生存"}')
+    assert custom.error is None and any(s.records for s in custom.results)
+    assert calls[-1][2] == "主公生存" and calls[-1][3]["topic"] == "身份"
+    assert custom.results[0].records[0].source_url == "https://example.com/analysis"
+
+
+def test_split_tool_loop_uses_skills_and_reference_without_internal_scope_input(tmp_path, library):
+    from synthetic_data import build_synthetic_database
+    database = build_synthetic_database(tmp_path)
+    def finish(history):
+        assert [x.call.name for x in history] == ["get_character_skills", "search_reference"]
+        assert history[0].response.results[0].records[0].character == "测试武将甲"
+        assert any(s.records for s in history[1].response.results)
+        return FinalAnswerTurn(status="partial", answer="按技能及身份观点分析的测试回答。")
+    model = ScriptedModel([
+        ToolCallTurn(call_id="skills", name="get_character_skills", arguments='{"characters":["测试武将甲"]}'),
+        ToolCallTurn(call_id="strategy", name="search_reference", arguments='{"kind":"策略","topic":"身份"}'), finish])
+    service = AskService(model, lambda: KnowledgeTools(database, ["synthetic-a"], preview=True, text_library=library))
+    result = asyncio.run(service.ask("测试武将甲适合做主公吗？"))
+    assert result.error is None and result.answer
+    assert result.citations == [] and any("未提供具体引用" in note for note in result.notes)
+
+
+def test_topic_changes_ranking_and_unknown_topic_has_no_silent_fallback(tmp_path, monkeypatch):
+    from app.services.text_library import _Section
+    from app.schemas.tools import TextPassage
+    collection = TextCollection(TextScopeInfo(scope_id="articles", record_type="analysis", game_id="reference",
+        applicability="合成测试"), tmp_path)
+    library = TextLibrary([collection])
+    sections = []
+    for source, topics, text in [("identity", ["身份", "配合"], "主公身份需要生存和忠臣配合。"),
+                                 ("value", ["收益", "强度"], "主公收益来自摸牌的资源价值与代价。")]:
+        passage = TextPassage(record_id=source, source_id=source, source_url="https://example.com/" + source,
+            scope_id="articles", game_id="reference", record_type="analysis", title=source, heading=source,
+            text=text, start=0, end=len(text), context_hash="snapshot", limitations=[], topics=topics)
+        sections.append(_Section(passage, text))
+    monkeypatch.setattr(library, "_analysis_sections", lambda _: sections)
+    identity = library.search("articles", "analysis", "主公", 2, topic="身份")
+    value = library.search("articles", "analysis", "主公", 2, topic="收益")
+    assert identity[0].source_id == "identity"
+    assert value[0].source_id == "value" and value[0].topics == ["收益", "强度"]
+    assert library.search("articles", "analysis", "主公", 2, topic="不存在的领域") == []
+
+
+def test_repeated_reference_query_returns_no_duplicate_body_and_keeps_original_readable(tmp_path, library):
+    session = tools(tmp_path, library)
+    args = '{"kind":"策略","topic":"身份","query":"主公生存"}'
+    first = session.invoke("search_reference", args)
+    records = [r for s in first.results for r in s.records]
+    assert records
+    seen = {(r.record_id, r.start, r.end) for r in records}
+    for _ in range(60):
+        second = session.invoke("search_reference", args)
+        assert second.error is None
+        new = [r for s in second.results for r in s.records]
+        if not new:
+            break
+        keys = {(r.record_id, r.start, r.end) for r in new}
+        assert not seen.intersection(keys)
+        seen.update(keys)
+    else:
+        pytest.fail("有限资料未能搜索完毕")
+    assert any("未找到新的" in note for note in second.notes)
+    original = session.invoke("read_evidence", json.dumps({"citation_id": records[0].citation_id}))
+    assert original.error is None and original.results[0].records[0].text

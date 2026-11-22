@@ -129,6 +129,25 @@ def test_result_cap_is_explicit_without_cutting_text(tool_data, tmp_path):
 
 def test_definitions_expose_only_current_tools_and_never_preview_override():
     definitions = KnowledgeTools.definitions()
-    assert [d['name'] for d in definitions] == ['discover_catalog', 'search_records', 'read_evidence']
+    assert [d['name'] for d in definitions] == ['discover_catalog', 'get_character_skills', 'search_reference', 'read_evidence']
     assert all('preview' not in d['parameters']['properties'] for d in definitions)
     assert all(d['parameters']['additionalProperties'] is False for d in definitions)
+
+
+def test_named_skill_tool_matches_existing_query_and_keeps_server_labels(tool_data):
+    tools = KnowledgeTools(tool_data, ["a", "b"], preview=True)
+    actual = tools.invoke("get_character_skills", '{"characters":["合成武将"],"mode":"经典"}')
+    expected = tools.invoke("search_records", '{"character":"合成武将","mode":"经典"}')
+    assert actual.error is None
+    assert [(s.game_id, [(r.record_id, r.skill_text) for r in s.records]) for s in actual.results] == [
+        (s.game_id, [(r.record_id, r.skill_text) for r in s.records]) for s in expected.results]
+    assert {s.game_id for s in actual.results} == {"a", "b"}
+    denied = tools.invoke("get_character_skills", '{"characters":["合成武将"],"game_ids":["outside"]}')
+    assert denied.error.code == "scope_denied"
+
+
+def test_split_tools_reject_cross_type_fields_without_opening_database(tmp_path):
+    tools = KnowledgeTools(tmp_path / "missing.sqlite3", ["a"], preview=True)
+    assert tools.invoke("get_character_skills", '{"characters":["合成武将"],"query":"主公"}').error.code == "invalid_arguments"
+    assert tools.invoke("search_reference", '{"kind":"策略","topic":"身份","scope_id":"invented"}').error.code == "invalid_arguments"
+    assert tools.invoke("search_reference", '{"kind":"策略"}').error.code == "invalid_arguments"

@@ -10,7 +10,7 @@ from typing import Self
 from pydantic import BaseModel
 
 from app.schemas.character import CharacterRecord
-from app.schemas.query import CatalogItem, Game, PreviewStatus, QueryFilters, SampleRecord, SearchResult
+from app.schemas.query import CatalogItem, Game, PreviewStatus, QueryFilters, SampleRecord, SearchResult, SamePageRelation, mode_labels
 from app.schemas.source import SourceRecord
 from app.services.data_processor import ProcessingResult
 
@@ -199,14 +199,15 @@ class KnowledgeRepository:
             raise ValueError("游戏范围为空、重复或未登记")
         return [game for game in games if game.game_id in game_ids]
 
-    def _query(self, game_id: str, filters: QueryFilters) -> list[SampleRecord]:
+    def _query(self, game: Game, filters: QueryFilters) -> list[SampleRecord]:
         columns = {"character": "c.character", "mode": "c.mode", "skill_name": "k.skill_name",
                    "package_name": "c.package_name", "faction": "c.faction"}
-        conditions, values = ["s.game_id=?", "c.review_status='pending'", "p.review_status='pending'"], [game_id]
+        conditions, values = ["s.game_id=?", "c.review_status='pending'", "p.review_status='pending'"], [game.game_id]
         for name, value in filters.model_dump().items():
             if value is not None:
-                conditions.append(f"{columns[name]}=?")
-                values.append(value)
+                labels = mode_labels(value, game.category) if name == "mode" else (value,)
+                conditions.append(f"{columns[name]} IN ({','.join('?' for _ in labels)})")
+                values.extend(labels)
         rows = self.connection.execute("""
             SELECT c.record_id AS parent_record_id,c.character,c.mode,c.package_kind,c.package_name,c.faction,c.hp_raw,
                    c.evidence_json,k.skill_name,k.skill_text,k.tags_json,s.game_id,s.source_id,s.source_locator,
@@ -226,6 +227,26 @@ class KnowledgeRepository:
             result.append(SampleRecord(**item))
         return result
 
+    def same_page_relations(self, game_id: str, characters: list[str]) -> list[SamePageRelation]:
+        """找与已知条目处于同一快照的其他条目，不跨服或跨快照推关联。"""
+        self._games([game_id])
+        if not characters:
+            return []
+        placeholders = ",".join("?" for _ in characters)
+        rows = self.connection.execute("""
+            SELECT DISTINCT peer.character, anchor.character AS related_to,
+                            s.source_id, s.source_locator, p.content_hash
+            FROM sanguosha_characters anchor
+            JOIN sanguosha_characters peer ON peer.snapshot_id=anchor.snapshot_id
+            JOIN source_snapshots p ON p.snapshot_id=anchor.snapshot_id
+            JOIN sources s ON s.source_id=p.source_id
+            WHERE s.game_id=? AND anchor.review_status='pending' AND peer.review_status='pending'
+                  AND p.review_status='pending' AND peer.character<>anchor.character
+                  AND anchor.character IN (""" + placeholders + ") ORDER BY peer.character,anchor.character,s.source_id",
+            [game_id, *characters],
+        )
+        return [SamePageRelation(**dict(row)) for row in rows]
+
     def _status(self, game_id: str, has_records: bool) -> PreviewStatus:
         if has_records:
             return "sample_available"
@@ -241,7 +262,7 @@ class KnowledgeRepository:
             raise ValueError("至少提供武将名、技能名、包名或势力")
         result = []
         for game in self._games(game_ids):
-            records = self._query(game.game_id, filters)
+            records = self._query(game, filters)
             result.append(SearchResult(game_id=game.game_id, status=self._status(game.game_id, bool(records)), records=records))
         return result
 
@@ -252,7 +273,7 @@ class KnowledgeRepository:
         filters = QueryFilters(character=character, package_name=package_name, faction=faction)
         result = []
         for game in self._games(game_ids):
-            records = self._query(game.game_id, filters)
+            records = self._query(game, filters)
             result.append(CatalogItem(
                 game_id=game.game_id, name=game.name, status=self._status(game.game_id, bool(records)),
                 characters=sorted({record.character for record in records}), modes=sorted({record.mode for record in records}),

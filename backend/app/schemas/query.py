@@ -6,6 +6,23 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.source import NonBlankText
 
+# 仅是同一模式的页面标签写法，不表示不同服共享规则。
+_MODE_LABELS = {"sanguosha": (("经典", "经典版本"),)}
+
+
+def mode_labels(mode: str, category: str) -> tuple[str, ...]:
+    """返回已登记类别的等价标签；未知名称保持精确匹配。"""
+    return next((labels for labels in _MODE_LABELS.get(category, ()) if mode in labels), (mode,))
+
+
+class SamePageRelation(BaseModel):
+    """同页补充关联的来源指针，不包含技能正文或审核结论。"""
+    character: str
+    related_to: str
+    source_id: str
+    source_locator: str
+    content_hash: str
+
 
 class Game(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

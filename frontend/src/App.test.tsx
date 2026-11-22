@@ -15,7 +15,8 @@ describe('后端连接状态', () => {
     render(<App />)
 
     expect(screen.getByRole('status').textContent).toContain('正在检查')
-    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('服务连接详情'))
+    expect((screen.getByRole('button', { name: /重新检查|检查中/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('取得有效健康响应后显示连接正常', async () => {
@@ -25,7 +26,8 @@ describe('后端连接状态', () => {
 
     await screen.findByText('后端连接正常')
     expect(fetchMock.mock.calls[0][0]).toBe('/health')
-    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByLabelText('服务连接详情'))
+    expect((screen.getByRole('button', { name: /重新检查|检查中/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('网络失败后允许重新检查，并可恢复正常', async () => {
@@ -36,6 +38,7 @@ describe('后端连接状态', () => {
     render(<App />)
 
     await screen.findByText('无法连接后端')
+    fireEvent.click(screen.getByLabelText('服务连接详情'))
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }))
     await screen.findByText('后端连接正常')
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -64,7 +67,8 @@ describe('后端连接状态', () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(screen.getByRole('status').textContent).toContain('无法连接后端')
-    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByLabelText('服务连接详情'))
+    expect((screen.getByRole('button', { name: /重新检查|检查中/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('页面卸载时取消尚未完成的请求', async () => {
@@ -76,5 +80,15 @@ describe('后端连接状态', () => {
 
     unmount()
     expect(options?.signal?.aborted).toBe(true)
+  })
+
+  it('连接详情默认收起，首页以提问为主体', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(healthyResponse()))
+    render(<App />)
+    await screen.findByText('后端连接正常')
+    expect(screen.getByLabelText('服务连接详情').parentElement?.hasAttribute('open')).toBe(false)
+    expect(screen.getByRole('heading', { name: '今天想了解什么？' })).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('服务连接详情'))
+    expect(screen.getByRole('button', { name: '重新检查' })).toBeTruthy()
   })
 })

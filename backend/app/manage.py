@@ -28,13 +28,14 @@ def main() -> None:
     sources.add_argument("--games-config", type=Path, required=True)
     sources.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     tool = commands.add_parser("tool", help="模拟模型发出只读工具调用；不接真实LLM")
-    tool.add_argument("name", choices=("discover_catalog", "search_records", "read_evidence"))
+    tool.add_argument("name", choices=("discover_catalog", "get_character_skills", "search_reference", "search_records", "read_evidence"))
     tool.add_argument("--arguments-file", type=Path, required=True, help="工具参数JSON文件")
     tool.add_argument("--game", action="append", dest="allowed_games", required=True, help="由程序限定的允许范围")
     tool.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     tool.add_argument("--preview", action="store_true", help="显式读取待审正文，仅本地开发预览")
     tool.add_argument("--text-config", type=Path, help="本地文本范围配置；模型不能指定此路径")
     tool.add_argument("--family-config", type=Path, help="程序提供的人物关联目录配置，模型不能指定路径")
+    tool.add_argument("--max-characters", type=int, default=20_000, help="本地程序设置的完整结果字符上限，批量读取时按实测配置")
     rules = commands.add_parser("process-rules", help="离线整理基础规则正文，不写数据库")
     rules.add_argument("--manifest", type=Path, default=WORKSPACE / "data/local/sgs-rules.local/manifest.json")
     rules.add_argument("--output-dir", type=Path, default=WORKSPACE / "data/local/rules-processed.local")
@@ -61,6 +62,7 @@ def main() -> None:
             output = {"database": str(args.database.resolve()), **report.model_dump()}
         elif args.command == "tool":
             tools = KnowledgeTools(args.database, args.allowed_games, preview=args.preview,
+                max_characters=args.max_characters,
                 text_library=load_text_library(args.text_config) if args.text_config else None,
                 character_families=CharacterFamilies.from_config(args.family_config) if args.family_config else None)
             result = tools.invoke(args.name, args.arguments_file.read_text(encoding="utf-8-sig"))

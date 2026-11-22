@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.schemas.character import CharacterRecord
-from app.schemas.query import CatalogItem, Game, QueryFilters as _Filters, SampleRecord, SearchResult
+from app.schemas.query import CatalogItem, Game, QueryFilters as _Filters, SampleRecord, SearchResult, mode_labels
 from app.services.data_processor import ProcessingResult
 from experiments.process_bwiki import SkillRecord
 
@@ -64,10 +64,10 @@ def _selected_games(store: SampleStore, game_ids: list[str] | None) -> tuple[Gam
     return tuple(game for game in store.games if game.game_id in game_ids)
 
 
-def _matching_records(store: SampleStore, game_id: str, filters: _Filters) -> list[SampleRecord]:
+def _matching_records(store: SampleStore, game: Game, filters: _Filters) -> list[SampleRecord]:
     matches = []
     for batch in store.batches:
-        if batch.source.game_id != game_id:
+        if batch.source.game_id != game.game_id:
             continue
         for record in batch.records:
             data = record.data
@@ -80,7 +80,7 @@ def _matching_records(store: SampleStore, game_id: str, filters: _Filters) -> li
                 item = SampleRecord(
                     character=data.character, mode=data.mode, skill_name=skill.skill_name, skill_text=skill.skill_text,
                     record_id=record_id, parent_record_id=record.record_id if character_data is not None else None,
-                    game_id=game_id, version_ids=list(batch.source.version_ids), source_id=batch.source.source_id,
+                    game_id=game.game_id, version_ids=list(batch.source.version_ids), source_id=batch.source.source_id,
                     source_locator=batch.source.source_locator, content_path=batch.source.content_path,
                     content_hash=batch.source.content_hash, locators=[block.locator for block in record.evidence],
                     package_kind=character_data.package_kind if character_data is not None else None,
@@ -89,7 +89,8 @@ def _matching_records(store: SampleStore, game_id: str, filters: _Filters) -> li
                     hp_raw=character_data.hp_raw if character_data is not None else None,
                     tags=skill.tags if character_data is not None else None,
                 )
-                if all(value is None or getattr(item, name) == value for name, value in filters.model_dump().items()):
+                if all(value is None or (getattr(item, name) in mode_labels(value, game.category) if name == "mode"
+                                        else getattr(item, name) == value) for name, value in filters.model_dump().items()):
                     matches.append(item)
     return matches
 
@@ -110,7 +111,7 @@ def discover_catalog(
     filters = _Filters(character=character, package_name=package_name, faction=faction)
     result = []
     for game in _selected_games(store, game_ids):
-        records = _matching_records(store, game.game_id, filters)
+        records = _matching_records(store, game, filters)
         result.append(CatalogItem(
             game_id=game.game_id, name=game.name, status=_status(store, game.game_id, bool(records)),
             characters=sorted({record.character for record in records}),
@@ -132,7 +133,7 @@ def search_records(
         raise ValueError("至少提供武将名、技能名、包名或势力")
     result = []
     for game in _selected_games(store, game_ids):
-        records = _matching_records(store, game.game_id, filters)
+        records = _matching_records(store, game, filters)
         result.append(SearchResult(
             game_id=game.game_id, status=_status(store, game.game_id, bool(records)), records=records,
         ))

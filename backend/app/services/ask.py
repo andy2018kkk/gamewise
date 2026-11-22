@@ -19,8 +19,8 @@ class AskService:
 
     def __init__(self, client: ModelClient, tools_factory: Callable[[], KnowledgeTools], *,
                  max_tool_calls: int = 8, max_rounds: int = 10,
-                 max_evidence_characters: int = 20_000, timeout_seconds: float = 30) -> None:
-        if (max_tool_calls < 1 or max_rounds < 1 or max_evidence_characters < 1
+                 max_evidence_characters: int | None = 20_000, timeout_seconds: float = 30) -> None:
+        if (max_tool_calls < 1 or max_rounds < 1 or (max_evidence_characters is not None and max_evidence_characters < 1)
                 or not 0 < timeout_seconds <= 300):
             raise ValueError("调用循环额度不合法")
         self.client, self.tools_factory = client, tools_factory
@@ -51,12 +51,13 @@ class AskService:
                 return failure("model_timeout", "本次问答已达到时间上限")
             try:
                 raw_turn = await asyncio.wait_for(self.client.respond(question=question,
-                    tools=tools.definitions(), history=tuple(item.model_copy(deep=True) for item in history)), remaining)
+                    tools=tools.definitions() if len(history) < self.max_tool_calls else [],
+                    history=tuple(item.model_copy(deep=True) for item in history)), remaining)
                 turn = TypeAdapter(ModelTurn).validate_python(raw_turn, strict=True)
             except TimeoutError:
                 return failure("model_timeout", "等待模型响应超时")
-            except ModelProviderError:
-                return failure("model_error", "模型服务调用失败，不是证据不足")
+            except ModelProviderError as error:
+                return failure("model_error", error.public_message)
             except ValidationError:
                 return failure("invalid_model_output", "模型返回的动作不符合约定格式")
             if isinstance(turn, FinalAnswerTurn):
@@ -66,12 +67,13 @@ class AskService:
                     return failure("invalid_citation", "模型返回了重复引用")
                 if any(citation not in allowed_citations for citation in turn.citation_ids):
                     return failure("invalid_citation", "模型引用了本问题未取得的证据")
+                notes = ["本地流程验证；引用编号有效不代表结论一定正确。"]
                 if turn.status in {"answered", "partial"} and not turn.citation_ids:
-                    return failure("missing_citation", "事实回答缺少本次检索证据")
+                    notes.append("模型未提供具体引用，保留回答供检查；不能视为已验证或已建立逐句引用。")
                 return AskResult(status="preview_answer" if turn.status == "answered" else turn.status,
                     answer=turn.answer, citations=[tools.resolve_citation(c) for c in turn.citation_ids],
                     trace=history, preview=tools.preview,
-                    notes=["本地流程验证；待审证据仍不可作为正式回答，引用合法不代表结论一定正确。"])
+                    notes=notes)
             if turn.call_id in seen_ids:
                 return failure("duplicate_call_id", "工具请求编号重复")
             if len(history) >= self.max_tool_calls:
@@ -95,7 +97,7 @@ class AskService:
                 return failure("tool_timeout", "等待只读工具超时")
             history.append(ToolExchange(call=turn, response=response, elapsed_ms=round((monotonic() - started) * 1000, 3)))
             total_characters += len(response.model_dump_json())
-            if total_characters > self.max_evidence_characters:
+            if self.max_evidence_characters is not None and total_characters > self.max_evidence_characters:
                 return failure("evidence_budget", "本次累计工具结果超出额度，未继续发送给模型")
             if response.error is not None and response.error.code == "storage_error":
                 return failure("storage_error", "资料读取失败，不是无资料")

@@ -6,12 +6,21 @@ import json
 from pathlib import Path
 import re
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from app.schemas.source import SourceBatch
 from app.schemas.tools import TextPassage, TextScopeInfo
 from app.services.rule_chunks import split_spans
 from app.services.rule_search import EmbeddingProvider, keyword_score, read_rule_context, search_rule_index
+
+
+REFERENCE_TOPICS = {"收益": "收益 牌差 资源", "身份": "主公 忠臣 反贼 内奸 选将",
+                    "配合": "配合 团队 联动", "强度": "强度 收益 代价", "技能结算": "技能 结算 时机"}
+
+
+def passage_key(passage: TextPassage) -> tuple[str, str, int, int, str]:
+    """同一原文位置和版本是同一片段；不把不同出处的相似文字合并。"""
+    return (passage.scope_id, passage.record_id, passage.start, passage.end, passage.context_hash)
 
 
 @dataclass(frozen=True)
@@ -22,6 +31,7 @@ class TextCollection:
     category: str | None = "基础规则参考"
     method: str = "keyword"
     provider: EmbeddingProvider | None = None
+    article_topics: dict[str, list[str]] | None = None
 
 
 class TextCollectionConfig(BaseModel):
@@ -30,6 +40,7 @@ class TextCollectionConfig(BaseModel):
     path: str
     ruleset_id: str | None = None
     category: str | None = "基础规则参考"
+    article_topics: dict[str, list[str]] = Field(default_factory=dict)
 
 
 def load_text_library(config_path: Path) -> "TextLibrary":
@@ -40,7 +51,7 @@ def load_text_library(config_path: Path) -> "TextLibrary":
         path = Path(config.path)
         if not path.is_absolute():
             path = config_path.resolve().parent / path
-        collections.append(TextCollection(config.info, path.resolve(), config.ruleset_id, config.category))
+        collections.append(TextCollection(config.info, path.resolve(), config.ruleset_id, config.category, article_topics=config.article_topics))
     return TextLibrary(collections)
 
 
@@ -120,6 +131,7 @@ class TextLibrary:
                     source_url=source.source_locator, scope_id=collection.info.scope_id,
                     game_id=source.game_id, record_type="analysis", title=source.title, heading=heading,
                     text=text, start=0, end=len(text), context_hash=row["text_sha256"],
+                    topics=(collection.article_topics or {}).get(source.source_id, []),
                     limitations=[collection.info.applicability, source.review_note or "社区观点，非官方规则",
                                  row["coverage"], *(["检索视图已排除已识别的推广行；原始及整理文件未修改。"] if excluded else [])])
                 sections.append(_Section(passage, text))
@@ -127,28 +139,43 @@ class TextLibrary:
             raise ValueError("配置的分析资料没有可读取正文")
         return sections
 
-    def search(self, scope_id: str, record_type: str, query: str, top_k: int) -> list[TextPassage]:
+    def search(self, scope_id: str, record_type: str, query: str, top_k: int, *,
+               topic: str | None = None, exclude: set[tuple[str, str, int, int, str]] | None = None) -> list[TextPassage]:
         collection = self.collection(scope_id, record_type)
         if not query.strip() or not 1 <= top_k <= 6:
             raise ValueError("文本问题或返回条数不合法")
+        topic_words = REFERENCE_TOPICS.get(topic, topic or "")
+        excluded = exclude or set()
         if record_type == "rule":
-            hits = search_rule_index(collection.path, query, provider=collection.provider, top_k=top_k,
+            hits = search_rule_index(collection.path, query + " " + topic_words, provider=collection.provider,
+                top_k=20 if topic or excluded else top_k,
                 method=collection.method, ruleset_id=collection.ruleset_id, category=collection.category)
             metadata = json.loads((collection.path / "index.json").read_text(encoding="utf-8"))
-            return [TextPassage(record_id=h["chunk_id"], source_id=h["source_id"], source_url=h["source_url"],
+            passages = [TextPassage(record_id=h["chunk_id"], source_id=h["source_id"], source_url=h["source_url"],
                 scope_id=scope_id, game_id=collection.info.game_id, record_type="rule", title=h["heading"],
                 heading=h["heading"], text=h["text"], start=h["start"], end=h["end"],
                 context_hash=metadata["chunks_sha256"], limitations=[collection.info.applicability]) for h in hits]
-        hits: list[tuple[float, TextPassage]] = []
+            if topic:
+                passages = [p for p in passages if keyword_score(topic_words, p.heading + "\n" + p.text) > 0]
+            return [p for p in passages if passage_key(p) not in excluded][:top_k]
+        hits: list[tuple[float, float, TextPassage]] = []
         for section in self._analysis_sections(collection):
             passage = section.passage
             for start, end in split_spans(section.body, passage.heading):
                 text = section.body[start:end]
+                candidate = passage.model_copy(update={"text": text, "start": start, "end": end})
+                if passage_key(candidate) in excluded:
+                    continue
+                topic_score = keyword_score(topic_words, passage.heading + "\n" + text) if topic else 0
+                topic_match = topic in passage.topics if topic else False
+                if topic and not topic_match and topic_score <= 0:
+                    continue
                 score = keyword_score(query, passage.heading + "\n" + text)
                 if score > 0:
-                    hits.append((score, passage.model_copy(update={"text": text, "start": start, "end": end})))
-        hits.sort(key=lambda pair: (-pair[0], pair[1].record_id, pair[1].start))
-        return [passage for _, passage in hits[:top_k]]
+                    # 先限定主题相关片段，再按具体问题排序；标签不是正确性评分。
+                    hits.append((float(topic_match), score + topic_score, candidate))
+        hits.sort(key=lambda item: (-item[0], -item[1], item[2].record_id, item[2].start))
+        return [passage for _, _, passage in hits[:top_k]]
 
     def read(self, passage: TextPassage, *, max_chars: int = 6000) -> TextPassage:
         if not 1 <= max_chars <= 6000:

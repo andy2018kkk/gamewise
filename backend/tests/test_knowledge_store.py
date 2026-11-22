@@ -124,6 +124,28 @@ def test_same_character_and_identical_skill_in_two_modes_stay_separate(setup_dat
         assert len(repository.search_records(game_ids=["a"], character="合成武将", mode="国战")[0].records) == 1
 
 
+@pytest.mark.parametrize("requested", ["经典", "经典版本"])
+def test_mode_labels_match_only_in_registered_category_without_mixing_modes(tmp_path, requested):
+    games = [Game(game_id="a", name="甲", category="sanguosha"), Game(game_id="b", name="乙", category="sanguosha"),
+             Game(game_id="c", name="其他游戏", category="other")]
+    paths = [save_batch(tmp_path, "a-classic", mode="经典", text="甲服经典原文"),
+             save_batch(tmp_path, "a-national", mode="国战", text="甲服国战原文"),
+             save_batch(tmp_path, "b-classic", "b", mode="经典版本", text="乙服经典原文"),
+             save_batch(tmp_path, "c-classic", "c", mode="经典版本", text="其他游戏原文")]
+    database = tmp_path / "modes.sqlite3"
+    import_character_files(database, paths, games)
+    store = load_samples(paths, games, record_format="character")
+    with KnowledgeRepository(database, readonly=True) as repo:
+        actual = repo.search_records(game_ids=["a", "b"], character="合成武将", mode=requested)
+        expected = search_records(store, game_ids=["a", "b"], character="合成武将", mode=requested)
+        assert [r.model_dump() for r in actual] == [r.model_dump() for r in expected]
+        assert [(r.game_id, [(s.mode, s.skill_text) for s in r.records]) for r in actual] == [
+            ("a", [("经典", "甲服经典原文")]), ("b", [("经典版本", "乙服经典原文")])]
+        unrelated = repo.search_records(game_ids=["c"], character="合成武将", mode="经典")[0]
+        assert not unrelated.records
+        assert repo.search_records(game_ids=["a"], character="合成武将", mode="经典限定")[0].records == []
+
+
 def test_conflict_rolls_back_earlier_insertions_in_same_batch(setup_data, tmp_path):
     database, games, paths = setup_data
     initial = import_character_files(database, [paths[0]], games)

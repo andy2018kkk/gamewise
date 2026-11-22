@@ -98,6 +98,19 @@ def test_model_round_limit_is_separate_from_tool_limit(database):
     assert result.error.code == 'round_limit'
 
 
+def test_query_budget_exhausted_still_allows_evidence_insufficiency_response(database):
+    class BudgetAwareModel:
+        async def respond(self, *, question, tools, history):
+            if not history:
+                assert tools
+                return call(name='unknown')
+            assert tools == []
+            return FinalAnswerTurn(status='insufficient_evidence', answer='查询预算用尽，未取得可用证据。')
+    service = AskService(BudgetAwareModel(), lambda: KnowledgeTools(database, ['a']), max_tool_calls=1)
+    result = asyncio.run(service.ask('问题'))
+    assert result.status == 'insufficient_evidence' and len(result.trace) == 1
+
+
 def test_repeated_request_is_detected_even_if_json_key_order_changes(database):
     second = ToolCallTurn(call_id='2', name='search_records', arguments='{"mode":"经典","character":"合成武将"}')
     result = run(database, [call(character='合成武将', mode='经典'), second])
@@ -115,7 +128,6 @@ def test_cumulative_evidence_budget_stops_before_next_model_step(database):
 
 
 @pytest.mark.parametrize('turn,code', [
-    (FinalAnswerTurn(status='answered', answer='没有查证就声称有答案。'), 'missing_citation'),
     (FinalAnswerTurn(status='answered', answer='编造引用', citation_ids=['invented']), 'invalid_citation'),
     (FinalAnswerTurn(status='answered', answer='来源https://invented.example/'), 'invalid_model_output'),
 ])
@@ -199,3 +211,15 @@ def test_model_cannot_mutate_retained_tool_results(database):
     result = run(database, [call(character='合成武将'), tamper])
     assert result.trace[0].response.results[0].records[0].skill_text == '准备阶段，摸2张牌。'
     assert result.citations[0].skill_text == '准备阶段，摸2张牌。'
+
+
+def test_missing_citation_preserves_answer_without_inventing_support(database):
+    result = run(database, [FinalAnswerTurn(status="answered", answer="这是尚未提供引用的回答。")])
+    assert result.error is None and result.answer == "这是尚未提供引用的回答。"
+    assert result.citations == [] and not result.answerable
+    assert any("未提供具体引用" in note for note in result.notes)
+
+
+def test_cumulative_size_limit_can_be_disabled_explicitly(database):
+    result = run(database, [call(character='合成武将'), answer_from_last], max_evidence_characters=None)
+    assert result.error is None and result.answer == '准备阶段，摸2张牌。'
